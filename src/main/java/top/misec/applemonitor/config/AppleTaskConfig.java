@@ -2,14 +2,10 @@ package top.misec.applemonitor.config;
 
 import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.core.util.StrUtil;
-import com.alibaba.fastjson2.JSON;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import top.misec.applemonitor.push.impl.BarkPush;
-import top.misec.applemonitor.push.impl.FeiShuBotPush;
-import top.misec.applemonitor.push.pojo.feishu.FeiShuPushDTO;
+import top.misec.applemonitor.job.AppleMonitor;
 
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -18,7 +14,9 @@ import java.util.List;
 @Data
 @Slf4j
 public class AppleTaskConfig {
-    public List<DeviceItem> deviceCodeList;
+    public List<List<String>> deviceCodeList;
+    public List<String> storeWhiteList;
+    private List<PushConfig> pushConfigs;
     public String location;
     public String cronExpressions;
     public String country;
@@ -43,27 +41,15 @@ public class AppleTaskConfig {
             return false;
         }
 
-        deviceCodeList.forEach(k -> {
-            if (k.getStoreWhiteList() == null) {
-                k.setStoreWhiteList(Collections.emptyList());
-                log.info("{},需要监控的门店为空，默认监控您附近的所有门店", k.getDeviceCode());
-            }
-             k.getPushConfigs().forEach(push -> {
-                 log.info("机器人开始干活啦");
-                 String content = StrUtil.format("您的机器人开始监控{}附近的Apple直营店啦", location);
+        if (storeWhiteList == null || storeWhiteList.isEmpty()) {
+            log.info("{},需要监控的门店为空，默认监控您附近的所有门店", deviceCodeList);
+        }
 
-                 if (StrUtil.isAllNotEmpty(push.getBarkPushUrl(), push.getBarkPushToken())) {
-                     BarkPush.push(content, push.getBarkPushUrl(), push.getBarkPushToken());
-                 }
-                 if (StrUtil.isAllNotEmpty(push.getFeishuBotSecret(), push.getFeishuBotWebhooks())) {
-                     FeiShuBotPush.pushTextMessage(FeiShuPushDTO.builder()
-                             .text(content).secret(push.getFeishuBotSecret())
-                             .botWebHooks(push.getFeishuBotWebhooks())
-                             .build());
-                 }
-             });
-        });
-
+        if (pushConfigs != null) {
+            log.info("机器人开始干活啦");
+            String content = StrUtil.format("您的机器人开始监控{}附近的Apple直营店啦", location);
+            AppleMonitor.pushAll(content, pushConfigs);
+        }
 
         log.info("配置校验通过，开始监控{}附近的Apple直营店", location);
 

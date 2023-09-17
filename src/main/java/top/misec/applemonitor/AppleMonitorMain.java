@@ -1,5 +1,6 @@
 package top.misec.applemonitor;
 
+import java.util.List;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -29,11 +30,15 @@ public class AppleMonitorMain {
             int size = appCfg.getAppleTaskConfig().deviceCodeList.size();
 
             String cronExpress = StrUtil.format("*/{} * * * * ?", size * 3);
-
-            log.info("您本次共监控{}个机型，过短的执行时间间隔会导致请求被限制，建议您的cron表达式设置为:{}", size, cronExpress);
+            String cronExpression = cronExpress;
+            if (StrUtil.isAllNotEmpty(appCfg.getAppleTaskConfig().cronExpressions))
+                cronExpression = appCfg.getAppleTaskConfig().cronExpressions;
+            int tot = appCfg.getAppleTaskConfig().deviceCodeList.stream().mapToInt(List::size).sum();
+            log.info("您本次共监控{}个机型，{}个分组，过短的执行时间间隔会导致请求被限制，建议您的cron表达式设置为:{}，当前表达式为:{}"
+                    , tot, size, cronExpress, cronExpression);
 
             Setting setting = new Setting();
-            setting.set("top.misec.applemonitor.job.AppleMonitor.monitor", appCfg.getAppleTaskConfig().cronExpressions);
+            setting.set("top.misec.applemonitor.job.AppleMonitor.monitor", cronExpression);
 
 
             CronUtil.setCronSetting(setting);
@@ -49,8 +54,5 @@ public class AppleMonitorMain {
         } finally {
             LOCK.unlock();
         }
-
-
     }
-
 }

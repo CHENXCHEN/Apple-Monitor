@@ -6,6 +6,10 @@ import lombok.Getter;
 import top.misec.applemonitor.config.PushApi;
 import top.misec.applemonitor.push.AbstractPush;
 import top.misec.applemonitor.push.model.PushMetaInfo;
+import top.misec.applemonitor.push.model.PushResult;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * WeiXinPush .
@@ -14,6 +18,12 @@ import top.misec.applemonitor.push.model.PushMetaInfo;
  * @since 2021-05-06 18:10
  **/
 public class WeComPush extends AbstractPush {
+
+    private final static WeComPush weComPush = new WeComPush();
+
+    public static PushResult send(PushMetaInfo metaInfo, String content) {
+        return weComPush.doPush(metaInfo, content);
+    }
 
     @Override
     protected String generatePushUrl(PushMetaInfo metaInfo) {
@@ -35,9 +45,12 @@ public class WeComPush extends AbstractPush {
 
     @Override
     protected String generatePushBody(PushMetaInfo metaInfo, String content) {
-
-        return JSONObject.toJSONString(content);
-//        return new Gson().toJson(new MessageModel(content));
+        Map<String, Object> map = new HashMap<>();
+        map.put("msgtype", "text");
+        HashMap<String, String> textMap = new HashMap<>();
+        textMap.put("content", content);
+        map.put("text", textMap);
+        return JSONObject.toJSONString(map);
     }
 
     @Getter

@@ -8,35 +8,53 @@ import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import top.misec.applemonitor.config.*;
+import top.misec.applemonitor.config.AppCfg;
+import top.misec.applemonitor.config.CfgSingleton;
+import top.misec.applemonitor.config.CountryEnum;
+import top.misec.applemonitor.config.PushConfig;
 import top.misec.applemonitor.push.impl.BarkPush;
 import top.misec.applemonitor.push.impl.FeiShuBotPush;
+import top.misec.applemonitor.push.impl.WeComPush;
+import top.misec.applemonitor.push.model.PushMetaInfo;
 import top.misec.applemonitor.push.pojo.feishu.FeiShuPushDTO;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * @author MoshiCoCo
  */
 @Slf4j
 public class AppleMonitor {
+    @Data
+    static public class DeviceResult {
+        private String storeName, deviceName, productStatus, deviceCode;
+        private Boolean available;
+
+        DeviceResult(String _storeName, String _deviceName, String _productStatus, String _deviceCode, Boolean _available) {
+            storeName = _storeName;
+            deviceName = _deviceName;
+            productStatus = _productStatus;
+            deviceCode = _deviceCode;
+            available = _available;
+        }
+    }
+
     private final AppCfg CONFIG = CfgSingleton.getInstance().config;
 
 
     public void monitor() {
 
-        List<DeviceItem> deviceItemList = CONFIG.getAppleTaskConfig().getDeviceCodeList();
+        List<List<String>> deviceCodeGroup = CONFIG.getAppleTaskConfig().getDeviceCodeList();
 
         //监视机型型号
 
 
         try {
-            for (DeviceItem deviceItem : deviceItemList) {
-                doMonitor(deviceItem);
+            for (List<String> deviceCodes : deviceCodeGroup) {
+                doMonitor(deviceCodes);
                 Thread.sleep(1500);
             }
         } catch (Exception e) {
@@ -45,35 +63,37 @@ public class AppleMonitor {
     }
 
 
-    public void pushAll(String content, List<PushConfig> pushConfigs) {
-
+    public static void pushAll(String content, List<PushConfig> pushConfigs) {
+        log.info("push message: {}", content);
         pushConfigs.forEach(push -> {
-
             if (StrUtil.isAllNotEmpty(push.getBarkPushUrl(), push.getBarkPushToken())) {
                 BarkPush.push(content, push.getBarkPushUrl(), push.getBarkPushToken());
             }
             if (StrUtil.isAllNotEmpty(push.getFeishuBotSecret(), push.getFeishuBotWebhooks())) {
-
                 FeiShuBotPush.pushTextMessage(FeiShuPushDTO.builder()
                         .text(content).secret(push.getFeishuBotSecret())
                         .botWebHooks(push.getFeishuBotWebhooks())
                         .build());
             }
+            if (StrUtil.isAllNotEmpty(push.getWE_COM_TOKEN())) {
+                WeComPush.send(PushMetaInfo.builder().token(push.getWE_COM_TOKEN()).build(), content);
+            }
         });
-
     }
 
-    public void doMonitor(DeviceItem deviceItem) {
+    public void doMonitor(List<String> deviceCodes) {
 
         Map<String, Object> queryMap = new HashMap<>(5);
         queryMap.put("pl", "true");
-        queryMap.put("mts.0", "regular");
-        queryMap.put("parts.0", deviceItem.getDeviceCode());
+        for (int i = 0; i < deviceCodes.size(); i++) {
+            queryMap.put("mts." + i, "regular");
+            queryMap.put("parts." + i, deviceCodes.get(i));
+        }
         queryMap.put("location", CONFIG.getAppleTaskConfig().getLocation());
 
         String baseCountryUrl = CountryEnum.getUrlByCountry(CONFIG.getAppleTaskConfig().getCountry());
 
-        Map<String, List<String>> headers = buildHeaders(baseCountryUrl, deviceItem.getDeviceCode());
+        Map<String, List<String>> headers = buildHeaders(baseCountryUrl, deviceCodes.get(0));
 
         String url = baseCountryUrl + "/shop/fulfillment-messages?" + URLUtil.buildQuery(queryMap, CharsetUtil.CHARSET_UTF_8);
 
@@ -100,38 +120,52 @@ public class AppleMonitor {
                 log.info("您所在的 {} 附近没有Apple直营店，请检查您的地址是否正确", CONFIG.getAppleTaskConfig().getLocation());
             }
 
-            stores.stream().filter(store -> {
-                if (deviceItem.getStoreWhiteList().isEmpty()) {
-                    return true;
+            Map<String, List<DeviceResult>> parseResult = stores.stream().filter(store -> {
+                        if (CONFIG.getAppleTaskConfig().getStoreWhiteList().isEmpty()) {
+                            return true;
+                        } else {
+                            return filterStore((JSONObject) store, CONFIG.getAppleTaskConfig().getStoreWhiteList());
+                        }
+                    }).map(k -> {
+                        JSONObject storeJson = (JSONObject) k;
+
+                        JSONObject partsAvailability = storeJson.getJSONObject("partsAvailability");
+
+                        String storeName = storeJson.getString("storeName").trim();
+                        ArrayList<DeviceResult> deviceResults = new ArrayList<>();
+                        for (String deviceCode : partsAvailability.keySet()) {
+                            JSONObject deviceData = partsAvailability.getJSONObject(deviceCode);
+                            String deviceName = deviceData.getJSONObject("messageTypes").getJSONObject("regular").getString("storePickupProductTitle");
+                            String productStatus = deviceData.getString("pickupSearchQuote");
+                            boolean available = judgingStoreInventory(storeJson, deviceCode);
+                            deviceResults.add(new DeviceResult(storeName, deviceName, productStatus, deviceCode, available));
+                        }
+                        return deviceResults;
+                    })
+                    .flatMap(Collection::stream)
+                    .collect(Collectors.groupingBy(DeviceResult::getStoreName));
+
+            for (Map.Entry<String, List<DeviceResult>> storeResult : parseResult.entrySet()) {
+                String storeName = storeResult.getKey();
+                List<DeviceResult> deviceResults = storeResult.getValue();
+                ArrayList<DeviceResult> availableResults = deviceResults.stream()
+                        .filter(DeviceResult::getAvailable)
+                        .collect(Collectors.toCollection(ArrayList::new));
+                if (availableResults.isEmpty()) {
+                    log.info("门店:{},总计{}款型号,状态:{}", storeName
+                            , deviceResults.size()
+                            , deviceResults.get(0).productStatus);
                 } else {
-                    return filterStore((JSONObject) store, deviceItem);
+                    String context = String.format(
+                            "门店:%s,型号:%s,状态:%s"
+                            , storeName
+                            , availableResults.stream().map(DeviceResult::getDeviceName).collect(Collectors.joining("/"))
+                            , availableResults.get(0).productStatus
+                    );
+                    pushAll(context, CONFIG.getAppleTaskConfig().getPushConfigs());
+                    log.info(context);
                 }
-            }).forEach(k -> {
-
-                JSONObject storeJson = (JSONObject) k;
-
-                JSONObject partsAvailability = storeJson.getJSONObject("partsAvailability");
-
-                String storeNames = storeJson.getString("storeName").trim();
-                String deviceName = partsAvailability.getJSONObject(deviceItem.getDeviceCode()).getJSONObject("messageTypes").getJSONObject("regular").getString("storePickupProductTitle");
-                String productStatus = partsAvailability.getJSONObject(deviceItem.getDeviceCode()).getString("pickupSearchQuote");
-
-
-                String strTemp = "门店:{},型号:{},状态:{}";
-
-                String content = StrUtil.format(strTemp, storeNames, deviceName, productStatus);
-
-                if (judgingStoreInventory(storeJson, deviceItem.getDeviceCode())) {
-                    JSONObject retailStore = storeJson.getJSONObject("retailStore");
-                    content += buildPickupInformation(retailStore);
-                    log.info(content);
-
-                    pushAll(content, deviceItem.getPushConfigs());
-
-
-                }
-                log.info(content);
-            });
+            }
 
         } catch (Exception e) {
             log.error("AppleMonitor error", e);
@@ -170,9 +204,9 @@ public class AppleMonitor {
         return StrUtil.format(messageTemplate, twoLineAddress.replace("\n", " "), daytimePhone, lo, distanceWithUnit);
     }
 
-    private boolean filterStore(JSONObject storeInfo, DeviceItem deviceItem) {
+    private boolean filterStore(JSONObject storeInfo, List<String> storeWhiteList) {
         String storeName = storeInfo.getString("storeName");
-        return deviceItem.getStoreWhiteList().stream().anyMatch(k -> storeName.contains(k) || k.contains(storeName));
+        return storeWhiteList.stream().anyMatch(k -> storeName.contains(k) || k.contains(storeName));
     }
 
     /**

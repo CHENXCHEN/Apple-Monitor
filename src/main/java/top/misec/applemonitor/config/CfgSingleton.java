@@ -5,6 +5,7 @@ import java.io.File;
 import com.alibaba.fastjson2.JSONObject;
 
 import cn.hutool.core.util.StrUtil;
+import org.yaml.snakeyaml.Yaml;
 import top.misec.applemonitor.utils.FileReader;
 
 /**
@@ -17,21 +18,24 @@ public class CfgSingleton {
     private volatile static CfgSingleton uniqueInstance;
 
     private CfgSingleton() {
-        String currentPath = System.getProperty("user.dir") + File.separator + "config.json";
+        String currentPath = System.getProperty("user.dir") + File.separator + "config.yaml";
         String configStr = FileReader.readFile(currentPath);
 
-        this.config = JSONObject.parseObject(configStr, AppCfg.class);
-
+        Yaml yaml = new Yaml();
+        this.config = yaml.loadAs(configStr, AppCfg.class);
     }
 
     private CfgSingleton(String fileName) {
         //default config use config.json
         if (StrUtil.isBlank(fileName)) {
-            fileName = "config.json";
+            fileName = "config.yaml";
         }
         String currentPath = System.getProperty("user.dir") + File.separator + fileName;
         String configStr = FileReader.readFile(currentPath);
-        this.config = JSONObject.parseObject(configStr, AppCfg.class);
+        System.out.println("here " + configStr);
+
+        Yaml yaml = new Yaml();
+        this.config = yaml.loadAs(configStr, AppCfg.class);
     }
 
     public static CfgSingleton getInstance() {
