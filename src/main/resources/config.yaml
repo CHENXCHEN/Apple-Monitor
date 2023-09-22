@@ -13,3 +13,4 @@ appleTaskConfig:
       barkPushToken: ''
       feishuBotWebhooks: ''
       feishuBotSecret: ''
+      WE_COM_TOKEN: ''
