@@ -1,0 +1,15 @@
+appleTaskConfig:
+  cronExpressions: '*/12 * * * * ?'
+  country: CN
+  location: 广东 深圳 南山区
+  deviceCodeList:
+    - MTQK3CH/A
+    - MTQL3CH/A
+    - MTQJ3CH/A
+    - MTQH3CH/A
+  storeWhiteList: []
+  pushConfigs:
+    - barkPushUrl: ''
+      barkPushToken: ''
+      feishuBotWebhooks: ''
+      feishuBotSecret: ''
